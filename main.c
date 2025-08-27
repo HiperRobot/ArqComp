@@ -28,13 +28,13 @@ int main() {
     struct matrix* m1 = create_matrix(2, 2);
     m1->rows[0] = 1.0; m1->rows[1] = 2.0;
     m1->rows[2] = 3.0; m1->rows[3] = 4.0;
-    
+
     printf("Original matrix:\n");
     print_matrix(m1);
-    
+
     float scalar = 2.0;
     scalar_matrix_mult(scalar, m1);
-    
+
     printf("After multiplication by %f:\n", scalar);
     print_matrix(m1);
 
