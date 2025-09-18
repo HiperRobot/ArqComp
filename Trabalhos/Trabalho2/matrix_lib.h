@@ -1,9 +1,21 @@
 #ifndef MATRIX_LIB_H
 #define MATRIX_LIB_H
 
-#include <stddef.h>
+struct matrix {
+    unsigned long int height;
+    unsigned long int width;
+    float *rows;
+};
 
-void scalar_matrix_mult(float scalar, const float *A, float *R, int N);
-void matrix_matrix_mult(const float *A, const float *B, float *C, int N);
+// Funções pedidas no enunciado
+int scalar_matrix_mult(float scalar_value, struct matrix *matrix);
+int matrix_matrix_mult(struct matrix *matrixA, struct matrix *matrixB, struct matrix *matrixC);
 
-#endif // MATRIX_LIB_H
+// Funções auxiliares
+struct matrix *allocate_matrix(unsigned long int height, unsigned long int width);
+void free_matrix(struct matrix *m);
+int load_matrix_from_file(struct matrix *m, const char *filename);
+int save_matrix_to_file(struct matrix *m, const char *filename);
+void print_matrix_sample(struct matrix *m);
+
+#endif

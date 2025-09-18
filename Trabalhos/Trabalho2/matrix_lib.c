@@ -1,71 +1,116 @@
-// matrix_lib.c
-#include "matrix_lib.h"
-#include <immintrin.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <immintrin.h>
+#include "matrix_lib.h"
 
-/*
-Implementation notes:
-- N must be multiple of 8
-- Uses aligned loads/stores and AVX/FMA intrinsics
-- matrix layout: row-major, element A[i*N + j]
-*/
+// Aloca matriz
+struct matrix *allocate_matrix(unsigned long int height, unsigned long int width) {
+    struct matrix *m = malloc(sizeof(struct matrix));
+    if (!m) return NULL;
 
-/* scalar * matrix: R = scalar * A */
-void scalar_matrix_mult(float scalar, const float *A, float *R, int N) {
-    int total = N * N;
-    int i = 0;
-    __m256 vscalar = _mm256_set1_ps(scalar);
+    m->height = height;
+    m->width = width;
+    m->rows = aligned_alloc(32, height * width * sizeof(float)); // alinhamento para AVX
+    if (!m->rows) {
+        free(m);
+        return NULL;
+    }
+    return m;
+}
 
-    /* process 8 floats at a time */
-    for (i = 0; i < total; i += 8) {
-        __m256 va = _mm256_load_ps(&A[i]);
-        __m256 vr = _mm256_mul_ps(vscalar, va);
-        _mm256_store_ps(&R[i], vr);
+// Libera memória
+void free_matrix(struct matrix *m) {
+    if (m) {
+        free(m->rows);
+        free(m);
     }
 }
 
-/* matrix multiplication C = A * B naive blocked ijk with vectorized inner loop that processes 8 columns at a time.
-   Block size chosen to be multiple of 8 and friendly with caches. */
-void matrix_matrix_mult(const float *A, const float *B, float *C, int N) {
-    // initialize C to zero
-    int total = N * N;
-    for (int i = 0; i < total; i += 8) {
-        _mm256_store_ps(&C[i], _mm256_setzero_ps());
+// Lê matriz de arquivo binário
+int load_matrix_from_file(struct matrix *m, const char *filename) {
+    FILE *f = fopen(filename, "rb");
+    if (!f) return 0;
+    size_t n = m->height * m->width;
+    fread(m->rows, sizeof(float), n, f);
+    fclose(f);
+    return 1;
+}
+
+// Salva matriz em arquivo binário
+int save_matrix_to_file(struct matrix *m, const char *filename) {
+    FILE *f = fopen(filename, "wb");
+    if (!f) return 0;
+    size_t n = m->height * m->width;
+    fwrite(m->rows, sizeof(float), n, f);
+    fclose(f);
+    return 1;
+}
+
+// Imprime até 256 elementos
+void print_matrix_sample(struct matrix *m) {
+    unsigned long int total = m->height * m->width;
+    unsigned long int limit = total > 256 ? 256 : total;
+    for (unsigned long int i = 0; i < limit; i++) {
+        printf("%.2f ", m->rows[i]);
+        if ((i + 1) % m->width == 0) printf("\n");
+    }
+    printf("\n");
+}
+
+// Multiplicação escalar * matriz (AVX)
+int scalar_matrix_mult(float scalar_value, struct matrix *matrix) {
+    if (!matrix || !matrix->rows) return 0;
+
+    unsigned long int size = matrix->height * matrix->width;
+    unsigned long int i;
+    __m256 scalar_vec = _mm256_set1_ps(scalar_value);
+
+    for (i = 0; i + 8 <= size; i += 8) {
+        __m256 vec = _mm256_loadu_ps(&matrix->rows[i]);
+        __m256 result = _mm256_mul_ps(vec, scalar_vec);
+        _mm256_storeu_ps(&matrix->rows[i], result);
     }
 
-    const int BS = 64; // blocking size (must be multiple of 8). Tune if needed.
+    for (; i < size; i++) {
+        matrix->rows[i] *= scalar_value;
+    }
 
-    for (int ii = 0; ii < N; ii += BS) {
-        int iimax = (ii + BS < N) ? ii + BS : N;
-        for (int kk = 0; kk < N; kk += BS) {
-            int kkmax = (kk + BS < N) ? kk + BS : N;
-            for (int jj = 0; jj < N; jj += BS) {
-                int jjmax = (jj + BS < N) ? jj + BS : N;
+    return 1;
+}
 
-                // Block (ii..iimax-1) x (jj..jjmax-1) with k over (kk..kkmax-1)
-                for (int i = ii; i < iimax; ++i) {
-                    for (int k = kk; k < kkmax; ++k) {
-                        // scalar a_ik
-                        float a_scalar = A[i * N + k];
-                        __m256 va = _mm256_set1_ps(a_scalar); // broadcast
+// Multiplicação de matrizes (A x B = C) com AVX/FMA
+int matrix_matrix_mult(struct matrix *matrixA, struct matrix *matrixB, struct matrix *matrixC) {
+    if (!matrixA || !matrixB || !matrixC) return 0;
+    if (matrixA->width != matrixB->height) return 0;
 
-                        // process 8 columns of B/C at once
-                        int j = jj;
-                        for (; j + 7 < jjmax; j += 8) {
-                            // load B[k, j..j+7]
-                            __m256 vb = _mm256_load_ps(&B[k * N + j]);
-                            // load C[i, j..j+7]
-                            __m256 vc = _mm256_load_ps(&C[i * N + j]);
-                            // vc += va * vb  (fused multiply-add)
-                            vc = _mm256_fmadd_ps(va, vb, vc);
-                            _mm256_store_ps(&C[i * N + j], vc);
-                        }
-                        // no tail expected because N multiple of 8; if not, handle here
-                    }
-                }
+    unsigned long int M = matrixA->height;
+    unsigned long int N = matrixA->width;
+    unsigned long int P = matrixB->width;
 
+    for (unsigned long int i = 0; i < M; i++) {
+        for (unsigned long int j = 0; j < P; j++) {
+            __m256 sum_vec = _mm256_setzero_ps();
+
+            unsigned long int k;
+            for (k = 0; k + 8 <= N; k += 8) {
+                __m256 a_vec = _mm256_loadu_ps(&matrixA->rows[i * N + k]);
+                __m256 b_vec = _mm256_loadu_ps(&matrixB->rows[k * P + j]);
+                sum_vec = _mm256_fmadd_ps(a_vec, b_vec, sum_vec);
             }
+
+            float temp[8];
+            _mm256_storeu_ps(temp, sum_vec);
+
+            float sum = 0.0f;
+            for (int t = 0; t < 8; t++) sum += temp[t];
+
+            for (; k < N; k++) {
+                sum += matrixA->rows[i * N + k] * matrixB->rows[k * P + j];
+            }
+
+            matrixC->rows[i * P + j] = sum;
         }
     }
+
+    return 1;
 }
