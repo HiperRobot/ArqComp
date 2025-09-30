@@ -1,0 +1,13 @@
+Caso de matrizes 1024 x 1024:
+
+Tempo de multiplicação por scalar: 0.000000 ms
+Tempo de multiplicação por matriz: 439.747986 ms
+Overall time: 938.478027 ms
+Processador: 12th Gen Intel(R) Core(TM) i7-12700H
+
+Caso de matrizes 2048 x 2048:
+
+Tempo de multiplicação por scalar: 0.000000 ms
+Tempo de multiplicação por matriz: 3815.865967 ms
+Overall time: 4361.952148 ms
+Processador: 12th Gen Intel(R) Core(TM) i7-12700H
